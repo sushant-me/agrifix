@@ -6,6 +6,14 @@ import {
   offlineRecommendedCrop, offlineCropsFor, offlineFertilizer, offlineYield, offlineRainfall,
   regionOf, REGION_SOIL, REGION_CLIMATE,
 } from '../utils/nepalAgri.js';
+import {
+  EXPERT_SYSTEM_PROMPT,
+  buildGroundedUserPrompt,
+  validateAndFilterCrops,
+  getViableCrops,
+  getZoneForDistrict,
+  normalizeSeason,
+} from '../utils/guardrails.js';
 
 const requireNumber = (v, name) => {
   const n = Number(v);
@@ -29,26 +37,55 @@ async function optionalQuery(module, text, values) {
   }
 }
 
-const EXPERT = `You are a senior agricultural scientist specialised in Nepal. You know Nepal's 7 provinces, its
-districts, the Terai / Hill / Himalayan agro-ecological zones, the monsoon seasons (Baisakh–Jeth early
-monsoon, Ashad–Bhadra main monsoon, Asoj–Mangsir post-monsoon, Magh–Chaitra winter), staple crops
-(paddy, maize, wheat, millet, barley, buckwheat, potato, mustard, sugarcane, lentil, chickpea, tea, ginger,
-cardamom, cauliflower, tomato) and standard NPK fertilizer guidance used in Nepal. Always answer in plain
-English, using SI units, and follow the output format exactly as requested. Never add disclaimers or extra
-text beyond the requested format.`;
-
 /**
- * Query the Hugging Face model. If the API is unreachable (offline, rate
- * limited, or blocked), fall back to the bundled Nepal-agriculture knowledge
- * base so the pages keep working everywhere.
+ * End-to-end LLM caller with Context Grounding, Strict Prompting,
+ * Post-Generation Validation Layer (Guardrails), and Feedback Retry.
  */
-async function predict(system, user, fallback, { maxNewTokens = 300 } = {}) {
+async function predictCropsWithGuardrails(district, season, contextData = {}, fallback) {
+  const viable = getViableCrops(district, season);
+  const sysPrompt = EXPERT_SYSTEM_PROMPT;
+  const userPrompt = buildGroundedUserPrompt(district, season, contextData);
+
   try {
-    return await askTextModel(system, user, { maxNewTokens });
+    const rawAnswer = await askTextModel(sysPrompt, userPrompt, { maxNewTokens: 300 });
+    let validation = validateAndFilterCrops(rawAnswer, district, season);
+
+    // If the LLM hallucinated invalid crops, attempt one corrective retry
+    if (validation.hallucinatedCrops.length > 0) {
+      console.warn(`[ML Guardrail] Intercepted hallucinations: ${validation.hallucinatedCrops.join(', ')} for ${district} in ${season}. Retrying with feedback...`);
+      try {
+        const retryUserPrompt = `${userPrompt}\n\nCRITICAL GUARDRAIL CORRECTION: In your previous attempt, you hallucinated invalid/out-of-season crops: [${validation.hallucinatedCrops.join(', ')}]. DO NOT output these. You must choose strictly from VIABLE_CANDIDATE_CROPS.`;
+        const retryAnswer = await askTextModel(sysPrompt, retryUserPrompt, { maxNewTokens: 300 });
+        const retryValidation = validateAndFilterCrops(retryAnswer, district, season);
+        if (retryValidation.validCrops.length >= 3) {
+          validation = retryValidation;
+        }
+      } catch (retryErr) {
+        console.warn(`[ML Guardrail] Retry failed (${retryErr.message || retryErr}); using sanitized validation.`);
+      }
+    }
+
+    if (validation.validCrops.length > 0) {
+      return {
+        crops: validation.validCrops,
+        provider: validation.hallucinatedCrops.length === 0 ? 'hugging-face-grounded' : 'grounded-guardrail-validated',
+        hallucinationsCaught: validation.hallucinatedCrops,
+        reason: `Grounded & verified recommendations for ${district} in ${season}`,
+      };
+    }
   } catch (err) {
-    console.warn(`[ml] Hugging Face unavailable (${err.message || err}); using offline knowledge base.`);
-    return await fallback();
+    console.warn(`[ML] LLM API unavailable (${err.message || err}); using validated offline knowledge base.`);
   }
+
+  // Fallback to offline rule-based knowledge base, still strictly validated through guardrails
+  const fallbackRaw = await fallback();
+  const fallbackValidation = validateAndFilterCrops(fallbackRaw, district, season);
+  return {
+    crops: fallbackValidation.validCrops,
+    provider: 'offline-rule-based',
+    hallucinationsCaught: fallbackValidation.hallucinatedCrops,
+    reason: `Indicative rule-based guidance for ${district} in ${season}`,
+  };
 }
 
 export const cropRecommendation = asyncHandler(async (req, res) => {
@@ -108,36 +145,31 @@ export const cropRecommendation = asyncHandler(async (req, res) => {
     soil = 'Auto (lab record)';
   }
 
-  const rule = await offlineRecommendedCrop({ n, p, k, t, h, ph, r: rainfall, season });
-  const crops = rule.crops
-    .map((c) => c.charAt(0).toUpperCase() + c.slice(1))
-    .filter(Boolean)
-    .slice(0, 6);
-  /*
-  const ignoredAnswer = await predict(
-    `${EXPERT} Given one soil reading and the current agricultural season, recommend 4-5 crops that will
-    grow best under those conditions in Nepal during that season. Reply with only a comma-separated list
-    of 4-5 crop names — no numbering, no explanation, no extra text.`,
-    `Season: ${season}; Soil N=${n} mg/kg, P=${p} mg/kg, K=${k} mg/kg; temperature ${t}°C; humidity ${h}%; soil pH ${ph}; rainfall ${rainfall} mm/year.`,
-    async () => (await offlineRecommendedCrop({ n, p, k, t, h, ph, r: rainfall, season })).crops.join(', ')
+  const result = await predictCropsWithGuardrails(
+    location,
+    season,
+    { temperature: t, humidity: h, rainfall, ph, n, p, k },
+    async () => (await offlineRecommendedCrop({ n, p, k, t, h, ph, r: rainfall, season, district: location })).crops
   );
-  const llmCrops = answer
-    .split(',')
-    .map((c) => cleanAnswer(c).split(/\s+/)[0].replace(/[^a-zA-Z-]/g, ''))
-    .map((c) => c.charAt(0).toUpperCase() + c.slice(1))
-    .filter(Boolean)
-    .slice(0, 6);
-  */
+
+  const crops = result.crops;
   if (!crops.length) throw new ApiError(502, 'Crop recommendation failed.');
-  console.info('[ML] module=cropRecommendation provider=offline-rule-based status=success');
+
+  console.info(`[ML] module=cropRecommendation provider=${result.provider} status=success crops=${crops.join(',')}`);
   res.json({
     success: true,
     data: {
       crops,
       crop: crops[0],
-       context: { location, season, temperature: t, humidity: h, rainfall, rainfallUnit: 'mm/year (default or farm-report unit not verified)', ph, soil, n, p, k, source },
-       metadata: { provider: 'offline-rule-based', mode: 'indicative-guidance', soilIsEstimated: !soil.includes('lab record'), reason: rule.reason },
-       message: `Indicative crop guidance: ${crops.join(', ')}`,
+      context: { location, season, temperature: t, humidity: h, rainfall, rainfallUnit: 'mm/year', ph, soil, n, p, k, source },
+      metadata: {
+        provider: result.provider,
+        mode: 'grounded-guardrail-guidance',
+        soilIsEstimated: !soil.includes('lab record'),
+        reason: result.reason,
+        hallucinationsCaught: result.hallucinationsCaught,
+      },
+      message: `Indicative crop guidance: ${crops.join(', ')}`,
     },
   });
 });
@@ -147,25 +179,28 @@ export const cropPrediction = asyncHandler(async (req, res) => {
   const district = requireString(req.body.district, 'district');
   const season = requireString(req.body.season, 'season');
 
-  const answer = (await offlineCropsFor(state, district, season)).join(', ');
-  /*
-  const ignoredAnswer = await predict(
-    `${EXPERT} List the crops typically grown in the given Nepal province and district during the given
-    agricultural season. Reply with a comma-separated list of 4–8 crop names and nothing else.`,
-    `Province: ${state}; District: ${district}; Season: ${season}.`,
-    async () => (await offlineCropsFor(state, district, season)).join(', ')
+  const result = await predictCropsWithGuardrails(
+    district,
+    season,
+    { province: state },
+    async () => await offlineCropsFor(state, district, season)
   );
-  */
-  const crops = cleanAnswer(answer)
-    .split(',')
-    .map((c) => c.trim())
-    .filter(Boolean)
-    .slice(0, 8)
-    .join(', ');
+
+  const crops = result.crops.join(', ');
   if (!crops) throw new ApiError(502, 'Crop prediction failed.');
+
+  console.info(`[ML] module=cropPrediction provider=${result.provider} status=success district=${district} season=${season}`);
   res.json({
     success: true,
-    data: { crops, metadata: { provider: 'offline-rule-based', mode: 'indicative-guidance' }, message: `Indicative crops grown in ${district} during the ${season} season: ${crops}` },
+    data: {
+      crops,
+      metadata: {
+        provider: result.provider,
+        mode: 'grounded-guardrail-guidance',
+        hallucinationsCaught: result.hallucinationsCaught,
+      },
+      message: `Indicative crops grown in ${district} during the ${season} season: ${crops}`,
+    },
   });
 });
 

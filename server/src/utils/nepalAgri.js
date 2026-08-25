@@ -121,112 +121,71 @@ const HILL_CROPS = ['maize', 'millet', 'potato', 'buckwheat', 'ginger'];
 const TERAI_CROPS = ['paddy', 'maize', 'wheat', 'mustard', 'sugarcane'];
 const MOUNTAIN_CROPS = ['barley', 'buckwheat', 'potato', 'millet'];
 
-// The client uses these agricultural season labels; rules use one canonical vocabulary.
-export function normalizeSeason(season) {
-  const value = String(season || '').toLowerCase();
-  if (/(kharif|monsoon|asar|shrawan|bhadra|baishak|jeth|barsha)/.test(value)) return 'monsoon';
-  if (/(rabi|winter|poush|falgun|holyo|hemanta)/.test(value)) return 'winter';
-  if (/(autumn|ashoj|kartik|mangsir)/.test(value)) return 'autumn';
-  if (/(summer|pre.?monsoon|spring)/.test(value)) return 'summer';
-  return 'any';
-}
+import {
+  getViableCrops,
+  validateAndFilterCrops,
+  getZoneForDistrict,
+  normalizeSeason as guardrailNormalizeSeason,
+} from './guardrails.js';
 
-function districtProfile(state, district) {
-  const key = String(district || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  const aliases = { ilam: 'illam' };
-  const base = DISTRICT_CROPS[aliases[key] || key];
-  if (base) return base;
-  const region = regionOf(state, district);
-  return region === 'terai' ? TERAI_CROPS : region === 'mountain' ? MOUNTAIN_CROPS : HILL_CROPS;
+export function normalizeSeason(season) {
+  return guardrailNormalizeSeason(season);
 }
 
 export function regionOf(state, district) {
-  const s = `${state} ${district}`.toLowerCase();
-  if (/(mountain|himal|mustang|dolpa|jumla|taplejung|manang|humla|mugu|sankhuwasabha|solukhumbu|rasuwa|bajura|rukum west)/.test(s)) return 'mountain';
-  if (/(terai|sunsari|morang|jhapa|banke|bardiya|kailali|kanchanpur|dhanusha|sarlahi|rupandehi|kapilbastu|nawalparasi|bara|parsa|rautahat|mahottari|saptari|siraha|udayapur|makwanpur|nawalpur|chitwan|chitwan)/.test(s)) return 'terai';
-  return 'hill';
+  return getZoneForDistrict(district || state || '');
 }
 
-/** Typical Nepal soil macronutrients (mg/kg) and moisture % by agro-ecological zone,
- *  used when no soil lab record exists for the location. */
+/** Typical Nepal soil macronutrients (mg/kg) and moisture % by agro-ecological zone */
 export const REGION_SOIL = {
   terai: { n: 45, p: 30, k: 35, moisture: 45 },
   hill: { n: 60, p: 40, k: 45, moisture: 40 },
   mountain: { n: 70, p: 50, k: 55, moisture: 35 },
 };
 
-/** Typical Nepal climate by agro-ecological zone, used when live weather is unavailable. */
+/** Typical Nepal climate by agro-ecological zone */
 export const REGION_CLIMATE = {
   terai: { t: 28, h: 70, rainfall: 1600, ph: 6.5 },
   hill: { t: 22, h: 75, rainfall: 2200, ph: 5.8 },
   mountain: { t: 13, h: 65, rainfall: 800, ph: 5.4 },
 };
 
-const SEASON_ADD = {
-  winter: ['wheat', 'mustard', 'lentil'],
-  monsoon: ['paddy', 'maize', 'millet', 'sugarcane'],
-  premonsoon: ['maize', 'potato', 'mustard'],
-  postmonsoon: ['maize', 'mustard', 'potato'],
-  autumn: ['paddy', 'maize', 'potato'],
-  spring: ['maize', 'potato', 'mustard'],
-  summer: ['paddy', 'maize', 'ginger'],
-};
-
 export async function offlineCropsFor(state, district, season, { allowOllama = false } = {}) {
+  const loc = district || state || 'Nepal';
+  const viable = getViableCrops(loc, season);
   if (allowOllama && isOllamaEnabled()) try {
     const text = await askOllama(
-      `${OLLAMA_CONTEXT} Recommend 4-8 staple crops actually grown in ${district}, ${state}, Nepal during the ${season} season. Reply with a comma-separated list of crop names and nothing else.`,
+      `${OLLAMA_CONTEXT} Recommend 4-8 staple crops grown in ${loc}, Nepal during ${season}. VIABLE CANDIDATES: ${viable.join(', ')}. Reply with comma-separated list chosen strictly from candidates.`,
     );
-    const crops = text.split(',').map((c) => cleanAnswer(c)).filter(Boolean).slice(0, 8);
-    if (crops.length) return crops;
+    const validated = validateAndFilterCrops(text, loc, season);
+    if (validated.validCrops.length) return validated.validCrops;
   } catch (err) {
     console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using rule fallback.`);
   }
-  const base = districtProfile(state, district);
-  const extra = SEASON_ADD[normalizeSeason(season)] || [];
-  return [...new Set([...extra.filter((crop) => base.includes(crop)), ...base])].slice(0, 8);
+  const validated = validateAndFilterCrops(viable, loc, season);
+  return validated.validCrops;
 }
 
 export async function offlineRecommendedCrop({ n, p, k, t, h, ph, r, season = 'Any', state = '', district = '' }, { allowOllama = false } = {}) {
+  const loc = district || state || 'Nepal';
+  const viable = getViableCrops(loc, season);
   if (allowOllama && isOllamaEnabled()) try {
     const text = await askOllama(
-      `${OLLAMA_CONTEXT} Recommend 4-5 crops that will grow best in Nepal under the given conditions and season. Reply with only a comma-separated list of crop names — no numbering, no extra text.`,
+      `${OLLAMA_CONTEXT} Recommend 4-5 crops that will grow best in Nepal under the given conditions and season. VIABLE CANDIDATES: ${viable.join(', ')}. Reply with only a comma-separated list chosen strictly from candidates.`,
       `Season: ${season}; soil N=${n} mg/kg, P=${p} mg/kg, K=${k} mg/kg; temperature ${t} C; humidity ${h}%; soil pH ${ph}; rainfall ${r} mm/year.`,
     );
-    const crops = text.split(',').map((c) => cleanAnswer(c).split(/\s+/)[0].replace(/[^a-zA-Z-]/g, '').toLowerCase()).filter(Boolean).slice(0, 6);
-    if (crops.length) return { crops, reason: `Best crops for these ${season.toLowerCase()} conditions (Ollama)` };
+    const validated = validateAndFilterCrops(text, loc, season);
+    if (validated.validCrops.length) return { crops: validated.validCrops, reason: `Best crops for these ${season.toLowerCase()} conditions (Ollama)` };
   } catch (err) {
     console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using rule fallback.`);
   }
-  const normalizedSeason = normalizeSeason(season);
-  const s = `${season}`.toLowerCase();
+
+  const validated = validateAndFilterCrops(viable, loc, season);
   const region = regionOf(state || district, district || state);
-  const profile = districtProfile(state, district || state);
-  const seasonal = SEASON_ADD[normalizedSeason] || [];
-  const one = () => {
-    if (normalizedSeason === 'winter') {
-      const preferred = ph >= 6.5 ? 'wheat' : 'mustard';
-      const crop = profile.includes(preferred) ? preferred : profile.find((item) => ['wheat', 'mustard', 'barley', 'buckwheat', 'lentil'].includes(item)) || profile[0];
-      return { crop, reason: `${crop} suits the cool ${season} season in ${district || state || 'this Nepal location'}` };
-    }
-    if (normalizedSeason === 'monsoon') {
-      const crop = profile.includes('paddy') ? 'paddy' : profile.find((item) => ['maize', 'millet', 'buckwheat', 'barley', 'potato'].includes(item)) || profile[0];
-      return { crop, reason: `${crop} is compatible with the ${region} crop profile during ${season}` };
-    }
-    if (normalizedSeason === 'autumn' && ph >= 6.5) {
-      return { crop: 'potato', reason: 'well-drained autumn soils with good K suit potato' };
-    }
-    const climateCrop = ph <= 5.5 && region === 'hill' ? 'tea'
-      : t >= 24 && r >= 1200 ? 'paddy'
-        : t >= 20 && r >= 800 && ph >= 5 ? 'maize'
-          : ph >= 6.5 && (k >= 80 || p >= 60) ? 'potato'
-            : t >= 15 && t <= 28 && h >= 50 ? 'mustard' : t >= 15 ? 'wheat' : 'millet';
-    const crop = profile.includes(climateCrop) ? climateCrop : profile.find((item) => seasonal.includes(item)) || profile[0];
-    return { crop, reason: `${crop} matches the ${region} profile for ${district || state || 'this location'} and the supplied soil and climate conditions` };
+  return {
+    crops: validated.validCrops,
+    reason: `Verified ${region} crops biologically suited for ${season} season in ${loc}`,
   };
-  const r1 = one();
-  const extras = (seasonal.length ? seasonal : ['lentil', 'mustard']).filter((crop) => profile.includes(crop));
-  return { crops: [...new Set([r1.crop, ...extras, ...profile])].slice(0, 6), reason: r1.reason };
 }
 
 export async function offlineFertilizer(cropName, { allowOllama = false } = {}) {

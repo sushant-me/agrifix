@@ -1,7 +1,15 @@
 import { env } from '../config/env.js';
 
 const HOSTS = [
-  // Hugging Face Inference API - primary (free tier with the user's HF token).
+  // Local Ollama instance (first priority for fast, local inference)
+  () => (env.OLLAMA_URL
+    ? {
+        url: `${env.OLLAMA_URL.replace(/\/+$/, '')}/v1/chat/completions`,
+        headers: {},
+        model: env.OLLAMA_MODEL || 'llama3:latest',
+      }
+    : null),
+  // Hugging Face Inference API - primary online fallback
   (model) => ({
     url: `https://api-inference.huggingface.co/models/${encodeURIComponent(model)}/v1/chat/completions`,
     headers: env.HUGGING_FACE_TOKEN ? { Authorization: `Bearer ${env.HUGGING_FACE_TOKEN}` } : {},

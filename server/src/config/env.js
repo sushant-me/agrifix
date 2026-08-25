@@ -54,10 +54,9 @@ export const env = {
   HUGGING_TEXT_MODEL: process.env.HUGGING_TEXT_MODEL || 'meta-llama/Llama-3.3-70B-Instruct',
   PLANT_DISEASE_MODEL: process.env.PLANT_DISEASE_MODEL || 'linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification',
   HUGGING_TIMEOUT: parseInt(process.env.HUGGING_TIMEOUT || '90000', 10),
-  // Ollama is opt-in. A hosted service cannot reach an Ollama instance running
-  // on a developer's machine, so do not default to localhost in production.
-  OLLAMA_URL: process.env.OLLAMA_URL || '',
-  OLLAMA_MODEL: process.env.OLLAMA_MODEL || 'llama3.2',
+  // Ollama local inference (auto-connects to local Ollama if available)
+  OLLAMA_URL: process.env.OLLAMA_URL || 'http://127.0.0.1:11434',
+  OLLAMA_MODEL: process.env.OLLAMA_MODEL || 'llama3:latest',
   OLLAMA_TIMEOUT: parseInt(process.env.OLLAMA_TIMEOUT || '60000', 10),
 
   // DeepSeek (OpenAI-compatible; used first when DEEPSEEK_API_KEY is set)
