@@ -11,17 +11,42 @@ const WMO_DESCRIPTIONS = {
   95: 'thunderstorm', 96: 'thunderstorm with slight hail', 99: 'thunderstorm with heavy hail',
 };
 
+const NEPAL_DISTRICT_CITY_MAP = {
+  chitwan: 'Bharatpur',
+  kaski: 'Pokhara',
+  morang: 'Biratnagar',
+  parsa: 'Birgunj',
+  rupandehi: 'Bhairahawa',
+  banke: 'Nepalgunj',
+  kailali: 'Dhangadhi',
+  dhanusha: 'Janakpur',
+  makwanpur: 'Hetauda',
+  sunsari: 'Dharan',
+  jhapa: 'Bhadrapur',
+  kavrepalanchok: 'Dhulikhel',
+  tanahun: 'Damauli',
+  syangja: 'Putalibazar',
+  nawalpur: 'Kawasoti',
+  'nawalparasi east': 'Kawasoti',
+  'nawalparasi west': 'Ramgram',
+  kanchanpur: 'Bhimdatta',
+  surkhet: 'Birendranagar',
+  dang: 'Ghorahi',
+};
+
 /** Fetch current weather for a city from OpenWeatherMap (metric units). */
 export async function fetchOpenWeather(city) {
+  const normCity = String(city || '').toLowerCase().trim();
+  const searchCity = NEPAL_DISTRICT_CITY_MAP[normCity] || city;
   const res = await axios.get('https://api.openweathermap.org/data/2.5/weather', {
-    params: { q: city, appid: env.WEATHER_API_KEY, units: 'metric' },
+    params: { q: `${searchCity},NP`, appid: env.WEATHER_API_KEY, units: 'metric' },
     timeout: 15000,
   });
   if (res.data?.cod !== 200) throw new Error('Weather API returned an error.');
   const d = res.data;
   return {
-    city: d.name,
-    country: d.sys?.country || '',
+    city: city || d.name,
+    country: d.sys?.country || 'Nepal',
     temperature: d.main?.temp ?? null,
     humidity: d.main?.humidity ?? null,
     windSpeed: d.wind?.speed ?? null,
@@ -34,12 +59,36 @@ export async function fetchOpenWeather(city) {
  * needed. Used when WEATHER_API_KEY is missing or OpenWeather fails.
  */
 async function fetchOpenMeteo(city) {
-  const geo = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
-    params: { name: city, count: 1, language: 'en', format: 'json' },
+  const normCity = String(city || '').toLowerCase().trim();
+  const searchCity = NEPAL_DISTRICT_CITY_MAP[normCity] || city;
+
+  let geo = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
+    params: { name: searchCity, count: 10, language: 'en', format: 'json' },
     timeout: 15000,
-  });
-  const place = geo.data?.results?.[0];
-  if (!place) throw new Error(`City "${city}" was not found.`);
+  }).catch(() => null);
+
+  let results = geo?.data?.results || [];
+  let place = results.find((r) => r.country_code === 'NP' || (r.country || '').toLowerCase().includes('nepal')) || results[0];
+
+  if (!place) {
+    geo = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
+      params: { name: `${searchCity}, Nepal`, count: 10, language: 'en', format: 'json' },
+      timeout: 15000,
+    }).catch(() => null);
+    results = geo?.data?.results || [];
+    place = results.find((r) => r.country_code === 'NP' || (r.country || '').toLowerCase().includes('nepal')) || results[0];
+  }
+  if (!place) throw new Error(`City or district "${city}" was not found.`);
+
+  if (!place) {
+    geo = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
+      params: { name: `${city}, Nepal`, count: 10, language: 'en', format: 'json' },
+      timeout: 15000,
+    }).catch(() => null);
+    results = geo?.data?.results || [];
+    place = results.find((r) => r.country_code === 'NP' || (r.country || '').toLowerCase().includes('nepal')) || results[0];
+  }
+  if (!place) throw new Error(`City or district "${city}" was not found.`);
 
   const wx = await axios.get('https://api.open-meteo.com/v1/forecast', {
     params: {

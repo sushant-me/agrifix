@@ -307,17 +307,44 @@ export const rainfallPrediction = asyncHandler(async (req, res) => {
   }
   if (!/^(terai|hill|mountain)$/i.test(region.trim())) {
     throw new ApiError(422, 'Field "region" must be Terai, Hill, or Mountain. Province-wide rainfall is not supported because each province spans multiple climate zones.');
+  const zone = getZoneForDistrict(region.trim());
+  const mm = await offlineRainfall(zone, monthKey, { allowOllama: true });
+
+  let seasonPhase = 'Monsoon Season';
+  let irrigationNeed = 'Natural rainfall is sufficient';
+  let advisory = 'Normal agricultural operations. Ensure field drainage during peak rains.';
+
+  if (['june', 'july', 'august'].includes(monthKey)) {
+    seasonPhase = 'Peak Monsoon Season';
+    irrigationNeed = 'No irrigation needed; rain-fed crops thrive.';
+    advisory = 'High rainfall period. Ideal for paddy transplanting. Maintain drainage to avoid waterlogging in upland crops.';
+  } else if (['september', 'october', 'november'].includes(monthKey)) {
+    seasonPhase = 'Post-Monsoon (Autumn)';
+    irrigationNeed = 'Light supplemental irrigation may be required for winter crops.';
+    advisory = 'Rainfall decreasing. Good window for harvesting monsoon crops and preparing soil for winter sowing.';
+  } else if (['december', 'january', 'february'].includes(monthKey)) {
+    seasonPhase = 'Winter Dry Season';
+    irrigationNeed = 'Critical: Supplemental irrigation required for wheat, mustard, and vegetables.';
+    advisory = 'Low precipitation period. Mulching and scheduled drip/furrow irrigation are recommended.';
+  } else if (['march', 'april', 'may'].includes(monthKey)) {
+    seasonPhase = 'Pre-Monsoon (Spring)';
+    irrigationNeed = 'Regular irrigation needed for spring maize and summer vegetables.';
+    advisory = 'Rising temperatures with sporadic thunderstorm showers. Prepare land for Kharif sowing.';
   }
 
-  const mm = await offlineRainfall(region, monthKey, { allowOllama: true });
-  console.info('[ML] module=rainfallPrediction provider=grounded-dhm-benchmark status=success');
+  console.info(`[ML] module=rainfallPrediction zone=${zone} month=${monthKey} mm=${mm}`);
   res.json({
     success: true,
     data: {
       rainfall: `${mm}`,
       unit: 'mm/month',
-      metadata: { provider: 'grounded-dhm-benchmark', mode: 'indicative-guidance', region, month: monthKey },
-      message: `Typical monthly rainfall in ${region} during ${monthKey.charAt(0).toUpperCase() + monthKey.slice(1)}: ${mm} mm/month`,
+      zone: zone.charAt(0).toUpperCase() + zone.slice(1),
+      month: monthKey.charAt(0).toUpperCase() + monthKey.slice(1),
+      seasonPhase,
+      irrigationNeed,
+      advisory,
+      metadata: { provider: 'grounded-dhm-benchmark', mode: 'indicative-guidance', region: zone, month: monthKey },
+      message: `Typical monthly rainfall in ${zone.charAt(0).toUpperCase() + zone.slice(1)} during ${monthKey.charAt(0).toUpperCase() + monthKey.slice(1)}: ${mm} mm/month (${seasonPhase})`,
     },
   });
 });
