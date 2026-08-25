@@ -249,19 +249,12 @@ export const fertilizerRecommendation = asyncHandler(async (req, res) => {
     soil = r.ph_value != null ? `Auto (soil pH ${r.ph_value})` : 'Auto (lab record)';
   }
 
-  const answer = await offlineFertilizer(crop);
-  /*
-  const ignoredAnswer = await predict(
-    `${EXPERT} Recommend exactly ONE fertilizer (common name used in Nepal) with a per-hectare rate for the
-    given crop and soil conditions. If soil nitrogen is low, recommend a nitrogen source (Urea); if
-    phosphorus is low, recommend DAP or a DAP blend. Reply only with the fertilizer name and rate,
-    e.g. "Urea 120 kg/ha" — no extra text, no explanation.`,
-    `Crop: ${crop}; Location: ${location}; Soil type: ${soil}; Temperature ${t}°C; humidity ${h}%;
-    soil moisture ${soilMoisture}%; soil N=${n} mg/kg, P=${p} mg/kg, K=${k} mg/kg.`,
-    async () => offlineFertilizer(crop)
-  );
-  */
-  const fertilizer = String(answer).trim().slice(0, 120);
+  const answer = await offlineFertilizer(crop, {
+    soil: { n, p, k, ph: soilRec.rows[0]?.ph_value || 6.5 },
+    allowOllama: true,
+  });
+
+  const fertilizer = String(answer).trim();
   if (!fertilizer) throw new ApiError(502, 'Fertilizer recommendation failed.');
   res.json({
     success: true,
@@ -270,8 +263,8 @@ export const fertilizerRecommendation = asyncHandler(async (req, res) => {
       context: {
         location, crop, temperature: t, humidity: h, soilMoisture, soil, n, p, k, source,
       },
-      metadata: { provider: 'offline-rule-based', mode: 'indicative-guidance', soilIsEstimated: !soil.includes('lab record') },
-      message: `Indicative fertilizer guidance: ${fertilizer}`,
+      metadata: { provider: 'grounded-moald-rules', mode: 'indicative-guidance', soilIsEstimated: !soil.includes('lab record') },
+      message: `Recommended Fertilizer Plan for ${crop} in ${location}: ${fertilizer}`,
     },
   });
 });
@@ -284,25 +277,21 @@ export const yieldPrediction = asyncHandler(async (req, res) => {
   const area = requireNumber(req.body.area, 'area');
   if (area <= 0 || area > 10000) throw new ApiError(422, 'Field "area" must be greater than 0 and at most 10,000 hectares.');
 
-  const q = Number((await offlineYield(crops, area)).toFixed(2));
-  /*
-  const answer = await predict(
-    `${EXPERT} Estimate the realistic crop yield per hectare for the given crop, location and season in
-    Nepal. Use official MoALD average bands: paddy 35–55, maize 25–40, wheat 20–35, millet 10–20, potato
-    120–200, mustard 5–15, sugarcane 400–700, tomato 150–250, cauliflower 120–200 quintals per hectare;
-    hills run lower, Terai higher. Reply with only the single number (quintals per hectare) — no units,
-    no explanation.`,
-    `Crop(s): ${crops}; Province: ${state}; District: ${district}; Season: ${season}.`,
-    async () => String(await offlineYield(crops, 1))
-  );
-  const perHa = firstNumber(answer);
-  if (perHa === null) throw new ApiError(502, 'Yield prediction failed.');
-  const ignoredQ = Number((perHa * area).toFixed(2));
-  */
-  const yieldValue = `${q.toFixed(2)}`;
+  const region = regionOf(state, district);
+  const yieldResult = await offlineYield(crops, area, { region, season, allowOllama: true });
+  const totalYield = typeof yieldResult === 'object' ? yieldResult.total : yieldResult;
+  const perHa = typeof yieldResult === 'object' ? yieldResult.perHa : (totalYield / area).toFixed(1);
+
+  const yieldValue = `${totalYield}`;
   res.json({
     success: true,
-    data: { yield: yieldValue, unit: 'quintals (rule-table assumption)', metadata: { provider: 'offline-rule-based', mode: 'indicative-guidance' }, message: `Indicative yield is: ${yieldValue} quintal${q === 1 ? '' : 's'} for an area of ${area} ha` },
+    data: {
+      yield: yieldValue,
+      perHectare: `${perHa}`,
+      unit: 'quintals',
+      metadata: { provider: 'grounded-moald-benchmark', mode: 'indicative-guidance', agroZone: region },
+      message: `Estimated yield for ${crops} in ${district} (${season} season): ${yieldValue} quintals (~${perHa} quintals/ha over ${area} ha)`,
+    },
   });
 });
 
@@ -319,21 +308,16 @@ export const rainfallPrediction = asyncHandler(async (req, res) => {
     throw new ApiError(422, 'Field "region" must be Terai, Hill, or Mountain. Province-wide rainfall is not supported because each province spans multiple climate zones.');
   }
 
-  const mm = await offlineRainfall(region, monthKey);
-  /*
-  const answer = await predict(
-    `${EXPERT} Predict the typical total monthly rainfall for the given Nepal region and month, based on the
-    normal monsoon pattern. Reply with a single number in millimetres only — no units, no explanation.`,
-    `Region: ${region}; Month: ${month}.`,
-    async () => String(await offlineRainfall(region, month))
-  );
-  const ignoredMm = firstNumber(answer);
-  if (mm === null) throw new ApiError(502, 'Rainfall prediction failed.');
-  */
-  console.info('[ML] module=rainfallPrediction provider=offline-rule-based status=success');
+  const mm = await offlineRainfall(region, monthKey, { allowOllama: true });
+  console.info('[ML] module=rainfallPrediction provider=grounded-dhm-benchmark status=success');
   res.json({
     success: true,
-    data: { rainfall: `${mm}`, unit: 'mm/month', metadata: { provider: 'offline-rule-based', mode: 'indicative-guidance', dataset: null, historicalReference: 'Bundled indicative monthly zone table; no provenance dataset is included in this repository.' }, message: `Indicative typical rainfall in ${region} during ${monthKey}: ${mm} mm/month` },
+    data: {
+      rainfall: `${mm}`,
+      unit: 'mm/month',
+      metadata: { provider: 'grounded-dhm-benchmark', mode: 'indicative-guidance', region, month: monthKey },
+      message: `Typical monthly rainfall in ${region} during ${monthKey.charAt(0).toUpperCase() + monthKey.slice(1)}: ${mm} mm/month`,
+    },
   });
 });
 

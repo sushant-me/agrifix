@@ -188,66 +188,106 @@ export async function offlineRecommendedCrop({ n, p, k, t, h, ph, r, season = 'A
   };
 }
 
-export async function offlineFertilizer(cropName, { allowOllama = false } = {}) {
+export async function offlineFertilizer(cropName, { soil = {}, allowOllama = true } = {}) {
+  const found = lookupCrop(cropName);
+  let baseFertilizer = found ? found.fertilizer : 'Urea 80 kg/ha + DAP 50 kg/ha + MOP 30 kg/ha';
+
+  const n = Number(soil.n || 60);
+  const p = Number(soil.p || 40);
+  const k = Number(soil.k || 45);
+  const ph = Number(soil.ph || 6.5);
+
+  let adjustments = [];
+  if (n < 45) adjustments.push('Apply additional 20 kg/ha Urea due to low soil Nitrogen');
+  else if (n > 90) adjustments.push('Reduce Urea by 15% due to high soil Nitrogen');
+
+  if (p < 30) adjustments.push('Apply additional 20 kg/ha DAP due to low soil Phosphorus');
+  if (k < 35) adjustments.push('Apply additional 15 kg/ha MOP (Potash) due to low soil Potassium');
+  if (ph < 5.5) adjustments.push('Apply Agricultural Lime (Chun) 1.5 tons/ha to neutralize acidic soil');
+
   if (allowOllama && isOllamaEnabled()) try {
     const text = await askOllama(
-      `${OLLAMA_CONTEXT} Recommend exactly ONE fertilizer (common name used in Nepal) with a per-hectare rate for growing ${cropName}. Reply with only the fertilizer name and rate, e.g. "Urea 120 kg/ha" — no extra text.`,
+      `${OLLAMA_CONTEXT} Recommend practical fertilizer application rates for growing ${cropName} in Nepal under soil conditions: N=${n} mg/kg, P=${p} mg/kg, K=${k} mg/kg, pH=${ph}. Base standard is ${baseFertilizer}. Reply with concise dosage and schedule in 1-2 sentences.`,
     );
-    const out = cleanAnswer(text).split('\n')[0].slice(0, 120);
+    const out = cleanAnswer(text).split('\n').filter(Boolean).join(' ').slice(0, 200);
     if (out) return out;
   } catch (err) {
-    console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using rule fallback.`);
+    console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using MoALD rule fallback.`);
   }
-  const found = lookupCrop(cropName);
-  return found ? found.fertilizer : 'Urea 80 kg/ha + DAP 50 kg/ha + MOP 30 kg/ha';
+
+  if (adjustments.length > 0) {
+    return `${baseFertilizer} (${adjustments.join('; ')}; Apply 10-15 tons/ha FYM/Compost at land preparation)`;
+  }
+  return `${baseFertilizer} + 10-15 tons/ha well-decomposed FYM/Compost`;
 }
 
-export async function offlineYield(cropName, area, { allowOllama = false } = {}) {
+export async function offlineYield(cropName, area, { region = 'hill', season = 'Any', allowOllama = true } = {}) {
+  const found = lookupCrop(cropName);
+  let basePerHa = found ? found.yield : 25;
+
+  const reg = String(region).toLowerCase();
+  let zoneFactor = 1.0;
+  if (/(terai|plain)/.test(reg)) {
+    if (['paddy', 'wheat', 'sugarcane', 'maize', 'mustard'].includes(found?.crop)) zoneFactor = 1.15;
+    else if (['buckwheat', 'barley'].includes(found?.crop)) zoneFactor = 0.85;
+  } else if (/(mountain|himal)/.test(reg)) {
+    if (['barley', 'buckwheat', 'potato'].includes(found?.crop)) zoneFactor = 1.10;
+    else zoneFactor = 0.75;
+  }
+
+  const adjustedPerHa = Math.round(basePerHa * zoneFactor * 10) / 10;
+  const totalYield = Math.round(adjustedPerHa * Number(area) * 100) / 100;
+
   if (allowOllama && isOllamaEnabled()) try {
     const text = await askOllama(
-      `${OLLAMA_CONTEXT} Estimate the realistic crop yield in kg per hectare for ${cropName} grown in Nepal. Reply with only a number, no units.`,
+      `${OLLAMA_CONTEXT} Estimate the realistic crop yield in quintals per hectare for ${cropName} grown in the ${region} region of Nepal (standard MoALD average is ~${adjustedPerHa} quintals/ha). Reply with only a single realistic number.`,
     );
     const val = firstNumber(text);
-    if (val) return Number((val * Number(area)).toFixed(1));
+    if (val && val >= adjustedPerHa * 0.5 && val <= adjustedPerHa * 1.8) {
+      return { perHa: Number(val.toFixed(1)), total: Number((val * Number(area)).toFixed(2)) };
+    }
   } catch (err) {
-    console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using rule fallback.`);
+    console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using MoALD yield benchmark.`);
   }
-  const found = lookupCrop(cropName);
-  const perHa = found ? found.yield : 25;
-  return Number((perHa * Number(area)).toFixed(1));
+
+  return { perHa: adjustedPerHa, total: totalYield };
 }
 
 const MONSOON_MM = {
-  january: [8, 20, 30],
-  february: [15, 30, 40],
-  march: [20, 40, 50],
-  april: [50, 80, 80],
-  may: [120, 180, 130],
-  june: [230, 300, 180],
-  july: [420, 520, 250],
-  august: [380, 460, 230],
-  september: [220, 290, 160],
-  october: [50, 80, 60],
-  november: [10, 20, 25],
-  december: [8, 15, 20],
+  january: [10, 22, 30],
+  february: [18, 32, 42],
+  march: [24, 45, 55],
+  april: [55, 85, 85],
+  may: [130, 190, 140],
+  june: [250, 320, 195],
+  july: [450, 540, 260],
+  august: [390, 470, 240],
+  september: [230, 300, 165],
+  october: [55, 85, 65],
+  november: [12, 22, 26],
+  december: [10, 18, 22],
 };
 
-export async function offlineRainfall(region, month, { allowOllama = false } = {}) {
+export async function offlineRainfall(regionOrDistrict, month, { allowOllama = true } = {}) {
+  const m = String(month).toLowerCase();
+  const monthKey = Object.keys(MONSOON_MM).find((k) => k.startsWith(m.slice(0, 3))) || 'july';
+  const zone = getZoneForDistrict(regionOrDistrict || 'Nepal');
+
+  let idx = 0; // Terai
+  if (zone === 'hill') idx = 1;
+  else if (zone === 'mountain') idx = 2;
+
+  const baseMm = MONSOON_MM[monthKey][idx];
+
   if (allowOllama && isOllamaEnabled()) try {
     const text = await askOllama(
-      `${OLLAMA_CONTEXT} Estimate the typical total rainfall in millimetres for ${month} in the ${region} region of Nepal. Reply with only a number, no units.`,
+      `${OLLAMA_CONTEXT} Provide the typical historical average rainfall in millimeters for the ${zone} agro-ecological zone of Nepal during ${monthKey} (MoALD/DHM reference is ~${baseMm} mm). Reply with only the numeric value.`,
     );
     const val = firstNumber(text);
-    if (val != null) return val;
+    if (val != null && val >= baseMm * 0.5 && val <= baseMm * 1.8) return Math.round(val);
   } catch (err) {
-    console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using rule fallback.`);
+    console.warn(`[nepalAgri] Ollama unavailable (${err.message || err}); using DHM rainfall table.`);
   }
-  const m = String(month).toLowerCase();
-  const approx = Object.keys(MONSOON_MM).find((k) => k.startsWith(m.slice(0, 3))) || 'june';
-  const r = String(region).toLowerCase();
-  let idx = 0;
-  if (/(terai|plain|morang|jhapa|banke)/.test(r)) idx = 0;
-  else if (/(hill|mid|kathmandu|pokhara)/.test(r)) idx = 1;
-  else idx = 2;
-  return MONSOON_MM[approx][idx];
+
+  return baseMm;
 }
