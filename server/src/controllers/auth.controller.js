@@ -74,7 +74,15 @@ export const signup = asyncHandler(async (req, res) => {
     [userId]
   );
 
-  res.status(201).json({ success: true, message: 'Account created. Please log in.' });
+  const payload = { id: userId, username, role: 'user' };
+  const token = signToken(payload);
+  setAuthCookie(res, token);
+
+  res.status(201).json({
+    success: true,
+    message: 'Account created successfully.',
+    data: { id: userId, username, role: 'user', avatar_url: avatarUrl },
+  });
 });
 
 /* ----------------------------------------------------------------- login */

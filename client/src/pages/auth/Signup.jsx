@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../api/client.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { Sprout, Camera } from 'lucide-react';
 
 export default function Signup() {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -58,7 +60,8 @@ export default function Signup() {
     fd.append('avatar', avatar);
     try {
       await api.post('/auth/signup', fd);
-      navigate('/login?flash=signup_ok');
+      await refresh();
+      navigate('/');
     } catch (err) {
       setError(err.message);
     } finally {
