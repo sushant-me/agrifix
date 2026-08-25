@@ -4,7 +4,7 @@ import { fetchWeatherData } from '../utils/weather.js';
 import { pool } from '../db/pool.js';
 import {
   offlineRecommendedCrop, offlineCropsFor, offlineFertilizer, offlineYield, offlineRainfall,
-  regionOf, REGION_SOIL, REGION_CLIMATE, getSeasonalClimate,
+  regionOf, REGION_SOIL, REGION_CLIMATE, getSeasonalClimate, getDistrictSoil,
 } from '../utils/nepalAgri.js';
 import {
   EXPERT_SYSTEM_PROMPT,
@@ -94,7 +94,7 @@ export const cropRecommendation = asyncHandler(async (req, res) => {
     ? req.body.season.trim()
     : 'Any';
   const zone = regionOf(location, location);
-  const soilDefaults = REGION_SOIL[zone];
+  const districtSoil = getDistrictSoil(location);
   const seasonalClimate = getSeasonalClimate(location, season);
 
   // Dynamic climate parameters matching the selected season and location
@@ -113,11 +113,11 @@ export const cropRecommendation = asyncHandler(async (req, res) => {
     } catch { /* fall through to seasonal defaults */ }
   }
 
-  // Auto-resolve soil: latest lab record for the farm zone → regional default
+  // Auto-resolve soil: district benchmark → lab record override if exists
   const levelToMg = (v, fallback) => ({ low: 40, medium: 80, high: 120 }[String(v || '').toLowerCase().trim()] ?? fallback);
-  let n = soilDefaults.n, p = soilDefaults.p, k = soilDefaults.k;
-  let ph = seasonalClimate.ph;
-  let soil = `Auto (${zone} default)`;
+  let n = districtSoil.n, p = districtSoil.p, k = districtSoil.k;
+  let ph = districtSoil.ph;
+  let soil = districtSoil.soilType || `Auto (${zone} soil)`;
   const soilRec = await optionalQuery('cropRecommendation',
     `SELECT nitrogen_level, phosphorus_level, potassium_level, ph_value
      FROM farm_soil_records WHERE farm_zone ILIKE $1 ORDER BY recorded_at DESC LIMIT 1`,
@@ -209,7 +209,7 @@ export const fertilizerRecommendation = asyncHandler(async (req, res) => {
   const location = requireString(req.body.location, 'location');
   const crop = requireString(req.body.crop, 'crop');
   const zone = regionOf(location, location);
-  const soilDefaults = REGION_SOIL[zone];
+  const districtSoil = getDistrictSoil(location);
   const climateDefaults = REGION_CLIMATE[zone];
 
   // Auto-resolve weather: live API → last cached record → regional default
@@ -232,11 +232,12 @@ export const fertilizerRecommendation = asyncHandler(async (req, res) => {
   }
   if (t === undefined) { t = climateDefaults.t; h = climateDefaults.h; }
 
-  // Auto-resolve soil: latest lab record for the farm zone → regional default
+  // Auto-resolve soil: district benchmark → lab record override if exists
   const levelToMg = (v, fallback) => ({ low: 40, medium: 80, high: 120 }[String(v || '').toLowerCase().trim()] ?? fallback);
-  let n = soilDefaults.n, p = soilDefaults.p, k = soilDefaults.k;
-  let soilMoisture = soilDefaults.moisture;
-  let soil = `Auto (${zone} default)`;
+  let n = districtSoil.n, p = districtSoil.p, k = districtSoil.k;
+  let ph = districtSoil.ph;
+  let soilMoisture = districtSoil.moisture;
+  let soil = districtSoil.soilType || `Auto (${zone} default)`;
   const soilRec = await optionalQuery('fertilizerRecommendation',
     `SELECT nitrogen_level, phosphorus_level, potassium_level, ph_value
      FROM farm_soil_records WHERE farm_zone ILIKE $1 ORDER BY recorded_at DESC LIMIT 1`,
@@ -247,11 +248,12 @@ export const fertilizerRecommendation = asyncHandler(async (req, res) => {
     n = levelToMg(r.nitrogen_level, n);
     p = levelToMg(r.phosphorus_level, p);
     k = levelToMg(r.potassium_level, k);
-    soil = r.ph_value != null ? `Auto (soil pH ${r.ph_value})` : 'Auto (lab record)';
+    if (r.ph_value != null) ph = Number(r.ph_value);
+    soil = 'Auto (lab record)';
   }
 
   const answer = await offlineFertilizer(crop, {
-    soil: { n, p, k, ph: soilRec.rows[0]?.ph_value || 6.5 },
+    soil: { n, p, k, ph },
     allowOllama: true,
   });
 
