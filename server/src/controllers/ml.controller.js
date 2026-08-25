@@ -91,45 +91,32 @@ async function predictCropsWithGuardrails(district, season, contextData = {}, fa
 export const cropRecommendation = asyncHandler(async (req, res) => {
   const location = requireString(req.body.location, 'location');
   const season = typeof req.body.season === 'string' && req.body.season.trim()
-    ? req.body.season.trim().slice(0, 40)
+    ? req.body.season.trim()
     : 'Any';
   const zone = regionOf(location, location);
   const soilDefaults = REGION_SOIL[zone];
-  const climateDefaults = REGION_CLIMATE[zone];
+  const seasonalClimate = getSeasonalClimate(location, season);
 
-  // Auto-resolve weather: live API → last cached record → regional default
-  let t, h, source = 'region-defaults';
-  try {
-    const wx = await fetchWeatherData(location);
-    if (wx.temperature != null && wx.humidity != null) {
-      t = Number(wx.temperature); h = Number(wx.humidity); source = 'live-weather';
-    }
-  } catch { /* fall through to cache / defaults */ }
-  if (t === undefined) {
-    const cached = await optionalQuery('cropRecommendation',
-      `SELECT temperature, humidity FROM weather_data WHERE city ILIKE $1
-       ORDER BY recorded_at DESC LIMIT 1`,
-      [`%${location}%`]
-    );
-    if (cached.rows[0]) {
-      t = Number(cached.rows[0].temperature); h = Number(cached.rows[0].humidity); source = 'cached-weather';
-    }
+  // Dynamic climate parameters matching the selected season and location
+  let t = seasonalClimate.t;
+  let h = seasonalClimate.h;
+  let rainfall = seasonalClimate.rainfall;
+  let source = 'seasonal-climate-model';
+
+  // If live weather is available and matches current season or "Any", use live readings
+  if (season === 'Any') {
+    try {
+      const wx = await fetchWeatherData(location);
+      if (wx.temperature != null && wx.humidity != null) {
+        t = Number(wx.temperature); h = Number(wx.humidity); source = 'live-weather';
+      }
+    } catch { /* fall through to seasonal defaults */ }
   }
-  if (t === undefined) { t = climateDefaults.t; h = climateDefaults.h; }
-
-  // Auto-resolve rainfall: latest farm weather report for the location → regional default
-  let rainfall = climateDefaults.rainfall;
-  const rainRec = await optionalQuery('cropRecommendation',
-    `SELECT rainfall_mm FROM farm_weather_reports WHERE location ILIKE $1
-     AND rainfall_mm IS NOT NULL ORDER BY report_time DESC LIMIT 1`,
-    [`%${location}%`]
-  );
-  if (rainRec.rows[0]) rainfall = Number(rainRec.rows[0].rainfall_mm);
 
   // Auto-resolve soil: latest lab record for the farm zone → regional default
   const levelToMg = (v, fallback) => ({ low: 40, medium: 80, high: 120 }[String(v || '').toLowerCase().trim()] ?? fallback);
   let n = soilDefaults.n, p = soilDefaults.p, k = soilDefaults.k;
-  let ph = climateDefaults.ph;
+  let ph = seasonalClimate.ph;
   let soil = `Auto (${zone} default)`;
   const soilRec = await optionalQuery('cropRecommendation',
     `SELECT nitrogen_level, phosphorus_level, potassium_level, ph_value
@@ -161,7 +148,21 @@ export const cropRecommendation = asyncHandler(async (req, res) => {
     data: {
       crops,
       crop: crops[0],
-      context: { location, season, temperature: t, humidity: h, rainfall, rainfallUnit: 'mm/year', ph, soil, n, p, k, source },
+      context: {
+        location,
+        season,
+        period: seasonalClimate.period,
+        temperature: t,
+        humidity: h,
+        rainfall,
+        rainfallUnit: season === 'Any' ? 'mm/year (annual)' : 'mm/season',
+        ph,
+        soil,
+        n,
+        p,
+        k,
+        source,
+      },
       metadata: {
         provider: result.provider,
         mode: 'grounded-guardrail-guidance',

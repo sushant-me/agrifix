@@ -110,7 +110,7 @@ export default function CropRecommendation() {
                 <span className="muted small">{label}</span>
                 <strong>
                   {context[key]}
-                  {key === 'temperature' ? '°C' : key === 'humidity' ? '%' : key === 'rainfall' ? ' mm' : ''}
+                  {key === 'temperature' ? '°C' : key === 'humidity' ? '%' : key === 'rainfall' ? ` mm (${context.rainfallUnit ? (context.rainfallUnit.includes('annual') ? 'annual' : 'seasonal') : 'seasonal'})` : ''}
                 </strong>
               </div>
             ))}

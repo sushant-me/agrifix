@@ -150,6 +150,42 @@ export const REGION_CLIMATE = {
   mountain: { t: 13, h: 65, rainfall: 800, ph: 5.4 },
 };
 
+/**
+ * Calculates dynamically adjusted temperature, humidity, and rainfall
+ * based on district agro-ecological zone and the specific agricultural season.
+ */
+export function getSeasonalClimate(districtOrZone, season = 'Any') {
+  const zone = getZoneForDistrict(districtOrZone || 'Nepal');
+  const normSeason = guardrailNormalizeSeason(season);
+
+  const seasonalMap = {
+    terai: {
+      winter: { t: 16, h: 58, rainfall: 38, ph: 6.5, period: 'Poush–Falgun (Dec–Feb)' },
+      summer: { t: 34, h: 62, rainfall: 209, ph: 6.5, period: 'Baisakh–Jestha (March–May)' },
+      monsoon: { t: 30, h: 84, rainfall: 1090, ph: 6.5, period: 'Asar–Bhadra (June–August)' },
+      autumn: { t: 25, h: 68, rainfall: 297, ph: 6.5, period: 'Asoj–Mangsir (Sept–Nov)' },
+      any: { t: 28, h: 70, rainfall: 1600, ph: 6.5, period: 'Annual Average' },
+    },
+    hill: {
+      winter: { t: 10, h: 52, rainfall: 72, ph: 5.8, period: 'Poush–Falgun (Dec–Feb)' },
+      summer: { t: 27, h: 60, rainfall: 320, ph: 5.8, period: 'Baisakh–Jestha (March–May)' },
+      monsoon: { t: 24, h: 86, rainfall: 1330, ph: 5.8, period: 'Asar–Bhadra (June–August)' },
+      autumn: { t: 20, h: 66, rainfall: 407, ph: 5.8, period: 'Asoj–Mangsir (Sept–Nov)' },
+      any: { t: 22, h: 75, rainfall: 2200, ph: 5.8, period: 'Annual Average' },
+    },
+    mountain: {
+      winter: { t: -2, h: 42, rainfall: 94, ph: 5.4, period: 'Poush–Falgun (Dec–Feb)' },
+      summer: { t: 18, h: 50, rainfall: 280, ph: 5.4, period: 'Baisakh–Jestha (March–May)' },
+      monsoon: { t: 16, h: 78, rainfall: 695, ph: 5.4, period: 'Asar–Bhadra (June–August)' },
+      autumn: { t: 11, h: 55, rainfall: 256, ph: 5.4, period: 'Asoj–Mangsir (Sept–Nov)' },
+      any: { t: 13, h: 65, rainfall: 800, ph: 5.4, period: 'Annual Average' },
+    },
+  };
+
+  const zoneData = seasonalMap[zone] || seasonalMap.hill;
+  return zoneData[normSeason] || zoneData.any;
+}
+
 export async function offlineCropsFor(state, district, season, { allowOllama = false } = {}) {
   const loc = district || state || 'Nepal';
   const viable = getViableCrops(loc, season);
