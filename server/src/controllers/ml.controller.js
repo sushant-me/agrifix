@@ -4,7 +4,7 @@ import { fetchWeatherData } from '../utils/weather.js';
 import { pool } from '../db/pool.js';
 import {
   offlineRecommendedCrop, offlineCropsFor, offlineFertilizer, offlineYield, offlineRainfall,
-  regionOf, REGION_SOIL, REGION_CLIMATE,
+  regionOf, REGION_SOIL, REGION_CLIMATE, getSeasonalClimate,
 } from '../utils/nepalAgri.js';
 import {
   EXPERT_SYSTEM_PROMPT,
@@ -302,11 +302,6 @@ export const rainfallPrediction = asyncHandler(async (req, res) => {
   const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
   const normalizedMonth = month.trim().toLowerCase();
   const monthKey = monthNames.find((name) => name.startsWith(normalizedMonth.slice(0, 3)));
-  if (!monthKey || normalizedMonth.length < 3) {
-    throw new ApiError(422, 'Field "month" must be one calendar month (e.g. July or Jul); annual and seasonal totals are not supported.');
-  }
-  if (!/^(terai|hill|mountain)$/i.test(region.trim())) {
-    throw new ApiError(422, 'Field "region" must be Terai, Hill, or Mountain. Province-wide rainfall is not supported because each province spans multiple climate zones.');
   const zone = getZoneForDistrict(region.trim());
   const mm = await offlineRainfall(zone, monthKey, { allowOllama: true });
 
