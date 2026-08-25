@@ -17,9 +17,8 @@ export default function ForgotPassword() {
     try {
       const res = await api.post('/auth/forgot-password', { identifier: identifier.trim() });
       sessionStorage.setItem('ags_reset_token', res.data.data.resetToken);
-      sessionStorage.setItem('ags_masked_email', res.data.data.maskedEmail);
-      setMaskedEmail(res.data.data.maskedEmail);
-      if (res.data.data.devOtp) setDevOtp(res.data.data.devOtp);
+      if (res.data.data.devOtp) sessionStorage.setItem('ags_dev_otp', res.data.data.devOtp);
+      else sessionStorage.removeItem('ags_dev_otp');
       navigate('/verify-otp');
     } catch (err) {
       setError(err.message);
