@@ -1,0 +1,17 @@
+district,zone,major_crop,avg_yield_quintal_ha,irrigated_pct,soil_type,dominant_season
+Jhapa,Terai,Paddy,48.5,82.0,Alluvial Loam,Monsoon
+Morang,Terai,Paddy,46.2,78.5,Sandy Loam,Monsoon
+Chitwan,Terai,Maize,42.0,85.0,Clay Loam,Spring/Summer
+Chitwan,Terai,Mustard,12.5,70.0,Sandy Loam,Winter
+Rupandehi,Terai,Wheat,35.8,80.0,Alluvial,Winter
+Gorkha,Hill,Maize,28.5,45.0,Red Clay Loam,Monsoon
+Gorkha,Hill,Wheat,22.0,38.0,Sandy Loam,Winter
+Gorkha,Hill,Potato,165.0,60.0,Loose Loam,Winter
+Kaski,Hill,Paddy,34.0,62.0,Silt Loam,Monsoon
+Kaski,Hill,Cauliflower,185.0,75.0,Loam,Autumn/Winter
+Mustang,Mountain,Apple,120.0,55.0,Mountain Glacial,Autumn
+Mustang,Mountain,Buckwheat,12.8,40.0,Sandy Gravel,Summer
+Mustang,Mountain,Barley,18.5,45.0,Sandy Loam,Winter
+Dolpa,Mountain,Barley,17.2,35.0,Rocky Loam,Winter
+Ilam,Hill,Tea,15.5,50.0,Acidic Loam,Summer/Monsoon
+Ilam,Hill,Cardamom,3.8,60.0,Humus Rich,Autumn

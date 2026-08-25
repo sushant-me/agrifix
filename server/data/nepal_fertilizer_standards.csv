@@ -1,0 +1,11 @@
+crop,urea_kg_ha,dap_kg_ha,mop_kg_ha,fym_tons_ha,optimal_ph,notes
+Paddy (Rice),100,60,40,10,6.0-7.0,Split Urea: 1/3 basal + 1/3 tillering + 1/3 panicle
+Wheat,90,45,25,10,6.5-7.5,Half Urea at sowing + half at first irrigation (CRI)
+Maize,120,60,30,12,6.0-7.2,Basal DAP+MOP; split Urea at knee-high and tasseling
+Potato,130,90,80,15,5.5-6.5,High potassium feeder; apply all P & K at planting
+Mustard,60,40,20,8,6.0-7.5,Add Sulphur 20 kg/ha for higher oil content
+Barley,50,30,20,8,6.0-7.5,Apply basal at land preparation
+Buckwheat,40,25,15,8,5.0-6.5,Low nutrient requirement; avoid excess Nitrogen
+Ginger,80,60,50,15,5.5-6.5,Heavy organic mulch required; apply Trichoderma
+Cauliflower,150,100,80,15,6.5-7.5,Apply Boron 10 kg/ha to prevent hollow stem
+Tomato,140,100,90,15,6.0-7.0,Calcium spray recommended to prevent blossom end rot
