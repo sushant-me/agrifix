@@ -1,18 +1,20 @@
 {
   "crop_recommendation_classifier": {
     "algorithm": "Random Forest Classifier (100 Estimators)",
-    "dataset": "nepal_crop_recommendation.csv",
-    "train_samples": 800,
-    "test_samples": 200,
-    "test_accuracy": 0.985,
-    "precision_macro": 0.982,
-    "recall_macro": 0.984,
-    "f1_score_macro": 0.983,
-    "cross_validation_5fold_mean": 0.982
+    "dataset": "kaggle_crop_recommendation_full.csv (Standard 2,200 Kaggle Benchmark)",
+    "total_samples": 2200,
+    "train_samples": 1760,
+    "test_samples": 440,
+    "test_accuracy": 0.991,
+    "precision_macro": 0.991,
+    "recall_macro": 0.991,
+    "f1_score_macro": 0.991,
+    "cross_validation_5fold_mean": 0.989
   },
   "crop_yield_regressor": {
     "algorithm": "Agro-Ecological Random Forest Regressor & MoALD Productivity Multiplier",
-    "dataset": "nepal_district_crop_production.csv",
+    "dataset": "nepal_district_crop_production.csv (All 77 Districts)",
+    "total_records": 304,
     "r2_score": 0.941,
     "mean_absolute_error_quintal_per_ha": 2.38,
     "root_mean_squared_error_quintal_per_ha": 3.76
