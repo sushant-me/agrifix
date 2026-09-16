@@ -1,0 +1,71 @@
+# The repository had no CI. There is no test suite to run yet, so this checks
+# what can be checked mechanically and cheaply: that the client still builds,
+# that every server source file parses, and that the ML pipeline compiles.
+#
+# That is deliberately not a substitute for tests, and the jobs say so. It is
+# the part that catches the failure mode this repository is most exposed to -
+# a change that breaks the production build and is only discovered at deploy.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    name: Client build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build (the same command Vercel runs)
+        run: npm run build
+
+  server:
+    name: Server sources
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Parse every source file
+        # No tests yet. This catches syntax and import-shape errors that would
+        # otherwise first appear when the route is hit in production.
+        run: find src -name '*.js' -print0 | xargs -0 -n1 node --check
+
+  ml:
+    name: ML pipeline compiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Compile the pipeline (no third-party install)
+        # requirements.txt notes that the guardrails run without pip installs,
+        # so the pipeline must parse with the standard library alone. Training
+        # is not run here: it refuses insufficient data by design and the
+        # repository ships no dataset.
+        run: python -m compileall -q server/ml
