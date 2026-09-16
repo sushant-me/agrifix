@@ -1,5 +1,7 @@
 # AgriSmart
 
+[![CI](https://github.com/sushant-me/agrifix/actions/workflows/ci.yml/badge.svg)](https://github.com/sushant-me/agrifix/actions/workflows/ci.yml)
+
 **Smart agriculture platform** for Nepal — a full-stack marketplace, farmer workspace and AI-driven advisory suite.
 
 React + Vite front end, Express REST API, PostgreSQL on Supabase. Hosted AI calls use Hugging Face and automatically fall back to a bundled Nepal-agriculture knowledge base when unavailable. The repository includes an optional, reproducible Python ML pipeline, but no training data or trained artifact is shipped.
